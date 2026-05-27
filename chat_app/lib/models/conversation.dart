@@ -1,0 +1,28 @@
+// chat_app/lib/models/conversation.dart
+class Conversation {
+  final int id;
+  final String type;
+  final String? name;
+  final String? lastMessage;
+  final DateTime? lastMessageTime;
+  final int unreadCount;
+
+  Conversation({
+    required this.id,
+    this.type = 'private',
+    this.name,
+    this.lastMessage,
+    this.lastMessageTime,
+    this.unreadCount = 0,
+  });
+
+  factory Conversation.fromJson(Map<String, dynamic> json) => Conversation(
+    id: json['id'] ?? 0,
+    type: json['type'] ?? 'private',
+    name: json['name'],
+    lastMessage: json['last_message'] ?? json['lastMessage'],
+    lastMessageTime: json['last_message_time'] != null
+      ? DateTime.tryParse(json['last_message_time']) : null,
+    unreadCount: json['unread_count'] ?? json['unreadCount'] ?? 0,
+  );
+}
