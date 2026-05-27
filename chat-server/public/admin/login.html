@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>嗷嗷聊天二代 · 管理后台</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f1f5f9; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .login-box { background: #fff; border-radius: 16px; padding: 40px; width: 380px; box-shadow: 0 4px 24px rgba(0,0,0,.08); text-align: center; }
+    h1 { color: #2563EB; font-size: 24px; margin-bottom: 4px; }
+    p { color: #737686; font-size: 14px; margin-bottom: 24px; }
+    input { width: 100%; padding: 12px; border: 1px solid #c3c6d7; border-radius: 10px; font-size: 14px; margin: 8px 0; outline: none; }
+    input:focus { border-color: #2563EB; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+    button { width: 100%; padding: 12px; background: #2563EB; color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 12px; }
+    button:hover { background: #1d4ed8; }
+    .error { color: #ef4444; font-size: 13px; margin-top: 8px; display: none; }
+  </style>
+</head>
+<body>
+  <div class="login-box">
+    <h1>🖥️ 嗷嗷聊天二代</h1>
+    <p>管理后台</p>
+    <input id="username" placeholder="管理员账号" autocomplete="username">
+    <input id="password" type="password" placeholder="密码" autocomplete="current-password">
+    <button onclick="login()">登 录</button>
+    <div class="error" id="error"></div>
+  </div>
+  <script>
+    async function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const err = document.getElementById('error');
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        const data = await res.json();
+        if (res.ok && data.code === 0 && data.data.user.isAdmin) {
+          localStorage.setItem('token', data.data.accessToken);
+          localStorage.setItem('refreshToken', data.data.refreshToken);
+          location.href = 'index.html';
+        } else {
+          err.style.display = 'block';
+          err.textContent = data.data?.user && !data.data.user.isAdmin ? '非管理员账号' : (data.message || '登录失败');
+        }
+      } catch (e) {
+        err.style.display = 'block';
+        err.textContent = '网络错误';
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>系统日志 · 嗷嗷聊天二代</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#f1f5f9}
+    .nav{display:flex;gap:2px;padding:16px 16px 0;flex-wrap:wrap}
+    .nav a{padding:9px 20px;border-radius:8px 8px 0 0;font-size:13px;text-decoration:none;color:#434655;background:#fff;font-weight:500}
+    .nav a.active{background:#2563EB;color:#fff}
+    .content{padding:16px;max-width:900px;margin:0 auto}
+    .log-box{background:#1e293b;color:#94a3b8;border-radius:12px;padding:20px;font-family:monospace;font-size:12px;line-height:2;min-height:300px}
+    .log-box .info{color:#22c55e}.log-box .warn{color:#f59e0b}.log-box .err{color:#ef4444}
+    .toolbar{margin-bottom:12px;display:flex;gap:8px}
+    .toolbar button{padding:6px 16px;border-radius:6px;border:none;cursor:pointer;font-size:12px;background:#fff}
+    .toolbar button.active{background:#2563EB;color:#fff}
+    .logout{float:right;font-size:13px;color:#ef4444;cursor:pointer;background:none;border:none;margin-top:8px}
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="index.html">📊 数据看板</a><a href="users.html">👥 用户管理</a>
+    <a href="messages.html">💬 消息监控</a><a href="logs.html" class="active">📋 系统日志</a>
+    <button class="logout" onclick="logout()">退出</button>
+  </div>
+  <div class="content">
+    <div class="toolbar">
+      <button class="active" id="btnAll">全部</button>
+      <button id="btnInfo" onclick="filter('INFO')">INFO</button>
+      <button id="btnWarn" onclick="filter('WARN')">WARN</button>
+      <button id="btnErr" onclick="filter('ERR')">ERR</button>
+      <span style="flex:1"></span>
+      <span style="font-size:12px;color:#737686;align-self:center">最近 50 条</span>
+    </div>
+    <div class="log-box" id="logs">
+      <span class="info">[INFO]</span> 系统启动<br>
+      <span class="info">[INFO]</span> 数据库连接成功<br>
+      <span class="info">[INFO]</span> Socket.IO 就绪<br>
+      <span class="info">[INFO]</span> 管理后台已就绪<br>
+      <span class="warn">[WARN]</span> FCM 未配置（推送不可用）<br>
+      <span class="info">[INFO]</span> 监听端口 3000
+    </div>
+  </div>
+  <script>
+    const token=localStorage.getItem('token');if(!token)location.href='login.html';
+    function logout(){localStorage.clear();location.href='login.html';}
+    function filter(lvl){document.querySelectorAll('.toolbar button').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');}
+  </script>
+</body>
+</html>

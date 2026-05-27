@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>用户管理 · 嗷嗷聊天二代</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:system-ui,sans-serif;background:#f1f5f9}
+    .nav{display:flex;gap:2px;padding:16px 16px 0;flex-wrap:wrap}
+    .nav a{padding:9px 20px;border-radius:8px 8px 0 0;font-size:13px;text-decoration:none;color:#434655;background:#fff;font-weight:500}
+    .nav a.active{background:#2563EB;color:#fff}
+    .content{padding:16px;max-width:960px;margin:0 auto}
+    .search{background:#fff;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;gap:8px}
+    .search input{flex:1;border:none;outline:none;font-size:14px}
+    table{width:100%;background:#fff;border-radius:12px;overflow:hidden;font-size:13px;border-collapse:collapse}
+    th{background:#f8fafc;padding:10px 12px;text-align:left;font-weight:600;color:#434655}
+    td{padding:10px 12px;border-bottom:1px solid #f1f5f9}
+    .status{padding:2px 10px;border-radius:10px;font-size:11px}
+    .active-status{background:#dcfce7;color:#16a34a}
+    .disabled-status{background:#fee2e2;color:#ef4444}
+    button{padding:4px 12px;border-radius:6px;border:none;cursor:pointer;font-size:12px}
+    .btn-disable{background:#fee2e2;color:#ef4444}
+    .btn-enable{background:#dcfce7;color:#16a34a}
+    .pagination{display:flex;justify-content:center;gap:8px;margin-top:12px}
+    .pagination span{padding:6px 12px;background:#fff;border-radius:6px;cursor:pointer;font-size:12px}
+    .pagination .cur{background:#2563EB;color:#fff}
+    .logout{float:right;font-size:13px;color:#ef4444;cursor:pointer;background:none;border:none;margin-top:8px}
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="index.html">📊 数据看板</a>
+    <a href="users.html" class="active">👥 用户管理</a>
+    <a href="messages.html">💬 消息监控</a>
+    <a href="logs.html">📋 系统日志</a>
+    <button class="logout" onclick="logout()">退出</button>
+  </div>
+  <div class="content">
+    <div class="search"><span>🔍</span><input id="searchInput" placeholder="搜索用户名或昵称..." oninput="loadUsers(1)"><span id="total"></span></div>
+    <table><thead><tr><th>用户</th><th>手机号</th><th>注册时间</th><th>状态</th><th>操作</th></tr></thead><tbody id="tbody"></tbody></table>
+    <div class="pagination" id="pager"></div>
+  </div>
+  <script>
+    const token = localStorage.getItem('token');
+    if(!token) location.href='login.html';
+    let page=1,query='';
+
+    async function api(path){const r=await fetch(path,{headers:{Authorization:`Bearer ${token}`}});if(r.status===401){localStorage.clear();location.href='login.html';}return r.json();}
+    function logout(){localStorage.clear();location.href='login.html';}
+
+    async function loadUsers(p){
+      page=p;query=document.getElementById('searchInput').value;
+      const{data}=await api(`/api/admin/users?page=${page}&limit=15&q=${encodeURIComponent(query)}`);
+      document.getElementById('total').textContent=`${data.total} 用户`;
+      document.getElementById('tbody').innerHTML=data.users.map(u=>`
+        <tr>
+          <td>${u.display_name} <span style="color:#737686;font-size:11px">@${u.username}</span>${u.is_admin?' <span style="font-size:10px;background:#dbe1ff;color:#2563EB;padding:1px 6px;border-radius:4px">管理员</span>':''}</td>
+          <td style="font-family:monospace;font-size:11px">${u.phone||'-'}</td>
+          <td>${new Date(u.created_at).toLocaleDateString('zh-CN')}</td>
+          <td><span class="status ${u.deactivated_at?'disabled-status':'active-status'}">${u.deactivated_at?'已禁用':'正常'}</span></td>
+          <td><button class="${u.deactivated_at?'btn-enable':'btn-disable'}" onclick="toggleUser(${u.id},${!!u.deactivated_at})">${u.deactivated_at?'启用':'禁用'}</button></td>
+        </tr>`).join('');
+
+      const totalPages=Math.ceil(data.total/15);
+      let pager='';
+      for(let i=1;i<=totalPages&&i<=10;i++) pager+=`<span class="${i===page?'cur':''}" onclick="loadUsers(${i})">${i}</span>`;
+      if(totalPages>10) pager+=`<span>...${totalPages}</span>`;
+      document.getElementById('pager').innerHTML=pager;
+    }
+
+    async function toggleUser(id,isDisabled){
+      await fetch(`/api/admin/users/${id}`,{method:'PUT',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},body:JSON.stringify({deactivated:!isDisabled})});
+      loadUsers(page);
+    }
+
+    loadUsers(1);
+  </script>
+</body>
+</html>
