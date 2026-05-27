@@ -1,8 +1,6 @@
 // chat_app/lib/screens/call_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import '../services/socket_service.dart';
-
 class CallScreen extends StatefulWidget {
   final int calleeId;
   final String calleeName;

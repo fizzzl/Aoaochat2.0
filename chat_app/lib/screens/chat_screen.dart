@@ -2,7 +2,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/socket_service.dart';
-import '../models/message.dart';
 import 'call_screen.dart';
 
 class ChatScreen extends StatefulWidget {

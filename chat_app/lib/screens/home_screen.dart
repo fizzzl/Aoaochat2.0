@@ -1,7 +1,5 @@
 // chat_app/lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../services/socket_service.dart';
 import 'conversation_list_screen.dart';
 import 'calls_history_screen.dart';
 import 'contacts_screen.dart';
