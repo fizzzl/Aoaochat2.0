@@ -1,12 +1,7 @@
 // chat_app/lib/main.dart — 嗷嗷聊天二代 App 入口
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'config.dart';
-import 'services/api_service.dart';
-import 'services/socket_service.dart';
 import 'screens/splash_screen.dart';
-import 'screens/auth_screen.dart';
-import 'screens/home_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
