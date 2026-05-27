@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>消息监控 · 嗷嗷聊天二代</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#f1f5f9}
+    .nav{display:flex;gap:2px;padding:16px 16px 0;flex-wrap:wrap}
+    .nav a{padding:9px 20px;border-radius:8px 8px 0 0;font-size:13px;text-decoration:none;color:#434655;background:#fff;font-weight:500}
+    .nav a.active{background:#2563EB;color:#fff}
+    .content{padding:16px;max-width:900px;margin:0 auto}
+    .search{background:#fff;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;gap:8px}
+    .search input{flex:1;border:none;outline:none;font-size:14px}
+    table{width:100%;background:#fff;border-radius:12px;overflow:hidden;font-size:13px;border-collapse:collapse}
+    th{background:#f8fafc;padding:10px 12px;text-align:left;font-weight:600;color:#434655}
+    td{padding:10px 12px;border-bottom:1px solid #f1f5f9}
+    .logout{float:right;font-size:13px;color:#ef4444;cursor:pointer;background:none;border:none;margin-top:8px}
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="index.html">📊 数据看板</a><a href="users.html">👥 用户管理</a>
+    <a href="messages.html" class="active">💬 消息监控</a><a href="logs.html">📋 系统日志</a>
+    <button class="logout" onclick="logout()">退出</button>
+  </div>
+  <div class="content">
+    <div class="search"><span>🔍</span><input id="searchInput" placeholder="搜索会话关键词..." oninput="load()"><span id="total"></span></div>
+    <table><thead><tr><th>会话 ID</th><th>类型</th><th>消息数</th><th>操作</th></tr></thead><tbody id="tbody"></tbody></table>
+  </div>
+  <script>
+    const token=localStorage.getItem('token');if(!token)location.href='login.html';
+    async function api(path){const r=await fetch(path,{headers:{Authorization:`Bearer ${token}`}});if(r.status===401){localStorage.clear();location.href='login.html';}return r.json();}
+    function logout(){localStorage.clear();location.href='login.html';}
+
+    async function load(){
+      const q=document.getElementById('searchInput').value;
+      const{data}=await api(`/api/admin/messages?q=${encodeURIComponent(q)}`);
+      document.getElementById('tbody').innerHTML=data.map(c=>`<tr><td>${c.conv_id}</td><td>${c.type==='private'?'私聊':'群聊'}</td><td>${c.msg_count}</td><td style="color:#2563EB;cursor:pointer">查看 →</td></tr>`).join('');
+      document.getElementById('total').textContent=`${data.length} 个会话`;
+    }
+    load();
+  </script>
+</body>
+</html>
