@@ -31,6 +31,10 @@ class SocketService extends ChangeNotifier {
     _socket = io.io(AppConfig.serverUrl, {
       'transports': ['websocket'],
       'autoConnect': false,
+      'reconnection': true,
+      'reconnectionDelay': 1000,
+      'reconnectionDelayMax': 5000,
+      'reconnectionAttempts': 999,
       'auth': {'token': token},
     });
 
@@ -42,6 +46,12 @@ class SocketService extends ChangeNotifier {
 
     _socket!.onDisconnect((_) {
       _connected = false;
+      notifyListeners();
+    });
+
+    _socket!.onReconnect((_) {
+      _connected = true;
+      _socket!.emit('conversation:list');
       notifyListeners();
     });
 

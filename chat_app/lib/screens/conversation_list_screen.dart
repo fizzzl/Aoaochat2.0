@@ -15,10 +15,16 @@ class ConversationListScreen extends StatelessWidget {
         builder: (_, socket, __) {
           final convs = socket.conversations;
           if (!socket.connected) {
-            return const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-              CircularProgressIndicator(color: Color(0xFF2563EB)),
-              SizedBox(height: 12),
-              Text('连接中...', style: TextStyle(color: Colors.grey)),
+            return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.cloud_off, size: 48, color: Color(0xFF2563EB)),
+              const SizedBox(height: 12),
+              const Text('连接断开', style: TextStyle(color: Colors.grey, fontSize: 15)),
+              const SizedBox(height: 8),
+              ElevatedButton.icon(
+                onPressed: () => socket.connect(),
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('重新连接'),
+              ),
             ]));
           }
           if (convs.isEmpty) {

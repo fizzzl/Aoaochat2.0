@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/socket_service.dart';
 
 class CallScreen extends StatefulWidget {
@@ -79,6 +80,20 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   Future<void> _initWebRTC() async {
+    // 请求麦克风权限
+    final micStatus = await Permission.microphone.request();
+    if (!micStatus.isGranted) {
+      setState(() => _status = '需要麦克风权限');
+      return;
+    }
+    if (widget.type == 'video') {
+      final camStatus = await Permission.camera.request();
+      if (!camStatus.isGranted) {
+        setState(() => _status = '需要摄像头权限');
+        return;
+      }
+    }
+
     try {
       final config = {
         'iceServers': [
