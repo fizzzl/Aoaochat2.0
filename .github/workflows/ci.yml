@@ -1,0 +1,109 @@
+name: 嗷嗷聊天二代 CI/CD
+
+on:
+  push:
+    branches: [master, feature/*]
+  pull_request:
+    branches: [master]
+
+jobs:
+  # ═══════════ 后端测试 ═══════════
+  backend-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chat-server
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: chat_app
+          POSTGRES_USER: chat_admin
+          POSTGRES_PASSWORD: ChatApp2026
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: chat-server/package-lock.json
+
+      - run: npm ci
+      - run: npm test
+        env:
+          DATABASE_URL: postgresql://chat_admin:ChatApp2026@localhost:5432/chat_app
+          JWT_SECRET: test-jwt-secret-do-not-use-in-production
+          JWT_REFRESH_SECRET: test-refresh-secret
+
+      - run: npx jest --coverage --coverageReporters=text-summary
+
+  # ═══════════ Flutter 测试 + 构建 ═══════════
+  flutter-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chat_app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.0'
+          channel: stable
+
+      - run: flutter pub get
+
+      - name: 静态分析
+        run: flutter analyze --no-fatal-infos
+
+      - name: Widget 测试
+        run: flutter test
+
+      - name: 构建 Android APK
+        run: flutter build apk --debug
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: chat_app/build/app/outputs/flutter-apk/app-debug.apk
+
+  # ═══════════ 部署到阿里云 ═══════════
+  deploy:
+    needs: [backend-test, flutter-test]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 部署服务端
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.ALIYUN_HOST }}
+          username: root
+          password: ${{ secrets.ALIYUN_PASSWORD }}
+          source: chat-server/src/,chat-server/package.json,chat-server/.env.example
+          target: /root/chat-server/
+
+      - name: 重启服务
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.ALIYUN_HOST }}
+          username: root
+          password: ${{ secrets.ALIYUN_PASSWORD }}
+          script: |
+            cd /root/chat-server
+            npm install --production
+            systemctl restart chat-server
+            echo "部署完成"
