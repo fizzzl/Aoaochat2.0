@@ -1,11 +1,14 @@
 // chat_app/lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../services/api_service.dart';
+import '../services/socket_service.dart';
 import '../models/call.dart';
 import 'conversation_list_screen.dart';
 import 'calls_history_screen.dart';
 import 'contacts_screen.dart';
 import 'settings_screen.dart';
+import 'call_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,6 +24,29 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadCalls();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _setupCallListener();
+    });
+  }
+
+  void _setupCallListener() {
+    final socket = context.read<SocketService>();
+    socket.onCallIncoming = (data) {
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => ChangeNotifierProvider<SocketService>.value(
+          value: socket,
+          child: CallScreen(
+            calleeId: ApiService.userId ?? 0,
+            calleeName: data['callerName'] ?? '',
+            type: data['type'] ?? 'voice',
+            isIncoming: true,
+            roomId: data['roomId'],
+            callerId: data['callerId'],
+            callerName: data['callerName'],
+          ),
+        ),
+      ));
+    };
   }
 
   Future<void> _loadCalls() async {

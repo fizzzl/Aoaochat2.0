@@ -101,13 +101,17 @@ class _ChatScreenState extends State<ChatScreen> {
       );
       return;
     }
-    context.read<SocketService>().startCall(calleeId: otherId, type: type);
+    final socket = context.read<SocketService>();
+    socket.startCall(calleeId: otherId, type: type);
     Navigator.push(context, MaterialPageRoute(
-      builder: (_) => CallScreen(
-        calleeId: otherId,
-        calleeName: widget.convName,
-        type: type,
-        isIncoming: false,
+      builder: (_) => ChangeNotifierProvider<SocketService>.value(
+        value: socket,
+        child: CallScreen(
+          calleeId: otherId,
+          calleeName: widget.convName,
+          type: type,
+          isIncoming: false,
+        ),
       ),
     ));
   }
