@@ -1,6 +1,7 @@
 // chat-server/src/socket.js — Socket.IO 全部事件处理
 const db = require('./db');
 const logger = require('./logger');
+const { sendPush } = require('./push');
 
 const onlineUsers = new Map();   // userId -> { status, displayName }
 const userSockets = new Map();   // userId -> Set<socketId>
@@ -103,6 +104,16 @@ function setupSocket(io) {
         );
 
         logger.info('消息发送', { msgId: message.id, conversationId });
+        // 离线推送
+        const convMembers = await db.getAll(
+          'SELECT user_id FROM conversation_members WHERE conversation_id = $1 AND user_id != $2',
+          [conversationId, userId]
+        );
+        for (const m of convMembers) {
+          if (!userSockets.has(m.user_id) || userSockets.get(m.user_id).size === 0) {
+            sendPush(m.user_id, displayName, content.trim().substring(0, 100), { conversationId: String(conversationId) });
+          }
+        }
       } catch (err) {
         logger.error('消息发送失败', { error: err.message });
         socket.emit('error', { code: 50000, message: '发送失败' });
@@ -162,7 +173,22 @@ function setupSocket(io) {
       try {
         const convs = await db.getAll(
           `SELECT c.id, c.type, c.name, c.last_message, c.last_message_time,
-                  cm.unread_count
+                  cm.unread_count,
+                  CASE WHEN c.type = 'private' THEN
+                    (SELECT u.display_name FROM users u
+                     JOIN conversation_members cm2 ON u.id = cm2.user_id
+                     WHERE cm2.conversation_id = c.id AND cm2.user_id != $1 LIMIT 1)
+                  ELSE c.name END as display_name,
+                  CASE WHEN c.type = 'private' THEN
+                    (SELECT u.id FROM users u
+                     JOIN conversation_members cm2 ON u.id = cm2.user_id
+                     WHERE cm2.conversation_id = c.id AND cm2.user_id != $1 LIMIT 1)
+                  END as other_user_id,
+                  CASE WHEN c.type = 'private' THEN
+                    (SELECT u.avatar_thumb_url FROM users u
+                     JOIN conversation_members cm2 ON u.id = cm2.user_id
+                     WHERE cm2.conversation_id = c.id AND cm2.user_id != $1 LIMIT 1)
+                  END as avatar_url
            FROM conversations c
            JOIN conversation_members cm ON c.id = cm.conversation_id AND cm.user_id = $1
            ORDER BY c.last_message_time DESC NULLS LAST`,
@@ -240,6 +266,7 @@ function setupSocket(io) {
         io.to(`user:${friendId}`).emit('friend:request', {
           userId, username, displayName, status: 'pending',
         });
+        sendPush(friendId, '新的好友请求', `${displayName} 请求添加你为好友`, { type: 'friend_request' });
       } catch (err) {
         logger.error('添加好友失败', { error: err.message });
       }
@@ -251,33 +278,33 @@ function setupSocket(io) {
         const smaller = Math.min(userId, friendId);
         const larger = Math.max(userId, friendId);
 
-        await db.run(
-          `UPDATE friendships SET status = 'accepted', updated_at = NOW()
-           WHERE user_id = $1 AND friend_id = $2`,
-          [smaller, larger]
-        );
+        const convId = await db.transaction(async (client) => {
+          await client.query(
+            `UPDATE friendships SET status = 'accepted', updated_at = NOW()
+             WHERE user_id = $1 AND friend_id = $2`,
+            [smaller, larger]
+          );
 
-        // 自动创建私聊会话
-        const existingConv = await db.getOne(
-          `SELECT c.id FROM conversations c
-           JOIN conversation_members cm1 ON c.id = cm1.conversation_id AND cm1.user_id = $1
-           JOIN conversation_members cm2 ON c.id = cm2.conversation_id AND cm2.user_id = $2
-           WHERE c.type = 'private'`,
-          [userId, friendId]
-        );
-        let convId;
-        if (!existingConv) {
-          const conv = await db.getOne(
+          const existing = await client.query(
+            `SELECT c.id FROM conversations c
+             JOIN conversation_members cm1 ON c.id = cm1.conversation_id AND cm1.user_id = $1
+             JOIN conversation_members cm2 ON c.id = cm2.conversation_id AND cm2.user_id = $2
+             WHERE c.type = 'private'`,
+            [userId, friendId]
+          );
+
+          if (existing.rows.length > 0) return existing.rows[0].id;
+
+          const conv = await client.query(
             `INSERT INTO conversations (type) VALUES ('private') RETURNING id`, []
           );
-          convId = conv.id;
-          await db.run(
+          const cid = conv.rows[0].id;
+          await client.query(
             `INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2), ($1, $3)`,
-            [convId, userId, friendId]
+            [cid, userId, friendId]
           );
-        } else {
-          convId = existingConv.id;
-        }
+          return cid;
+        });
 
         socket.emit('friend:accepted', { friendId, conversationId: convId });
         io.to(`user:${friendId}`).emit('friend:accepted', { friendId: userId, conversationId: convId });
@@ -327,6 +354,7 @@ function setupSocket(io) {
           type,
           roomId,
         });
+        sendPush(calleeId, `${displayName} 的${type === 'video' ? '视频' : '语音'}通话`, '来电', { type: 'call', roomId });
         logger.info('通话发起', { roomId, callerId: userId, calleeId });
       } catch (err) {
         logger.error('发起通话失败', { error: err.message });

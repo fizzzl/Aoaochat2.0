@@ -28,12 +28,22 @@ class ConversationListScreen extends StatelessWidget {
             itemCount: convs.length,
             itemBuilder: (_, i) {
               final conv = convs[i];
+              final isOnline = conv.otherUserId != null &&
+                socket.onlineUsers.any((u) => u.id == conv.otherUserId);
               return ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: const Color(0xFFDBE1FF),
-                  child: Text(conv.name ?? '?', style: const TextStyle(color: Color(0xFF2563EB))),
-                ),
-                title: Text(conv.name ?? '会话 ${conv.id}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                leading: Stack(children: [
+                  CircleAvatar(
+                    backgroundColor: const Color(0xFFDBE1FF),
+                    child: Text((conv.displayName ?? conv.name ?? '?')[0], style: const TextStyle(color: Color(0xFF2563EB))),
+                  ),
+                  if (isOnline)
+                    Positioned(bottom: 0, right: 0, child: Container(
+                      width: 12, height: 12,
+                      decoration: BoxDecoration(color: const Color(0xFF22C55E), shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2)),
+                    )),
+                ]),
+                title: Text(conv.displayName ?? conv.name ?? '会话 ${conv.id}', style: const TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text(conv.lastMessage ?? '暂无消息', maxLines: 1, overflow: TextOverflow.ellipsis),
                 trailing: conv.unreadCount > 0
                   ? Container(
@@ -45,7 +55,14 @@ class ConversationListScreen extends StatelessWidget {
                 onTap: () {
                   socket.getHistory(conversationId: conv.id);
                   Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => ChatScreen(conversationId: conv.id, convName: conv.name ?? '会话'),
+                    builder: (_) => ChangeNotifierProvider<SocketService>.value(
+                      value: socket,
+                      child: ChatScreen(
+                        conversationId: conv.id,
+                        convName: conv.displayName ?? conv.name ?? '会话',
+                        otherUserId: conv.otherUserId,
+                      ),
+                    ),
                   ));
                 },
               );

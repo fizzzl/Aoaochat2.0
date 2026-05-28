@@ -102,11 +102,35 @@ class SocketService extends ChangeNotifier {
       notifyListeners();
     });
 
+    _socket!.on('message:read_ack', (data) {
+      final convId = data['conversationId'] as int;
+      final msgs = _messages[convId];
+      if (msgs != null) {
+        for (int i = 0; i < msgs.length; i++) {
+          if (msgs[i].readAt == null) {
+            msgs[i] = Message(
+              id: msgs[i].id, conversationId: msgs[i].conversationId,
+              senderId: msgs[i].senderId, content: msgs[i].content,
+              createdAt: msgs[i].createdAt,
+              senderDisplayName: msgs[i].senderDisplayName,
+              readAt: DateTime.now(),
+            );
+          }
+        }
+        notifyListeners();
+      }
+    });
+
     _socket!.on('call:incoming', _onCallIncoming);
     _socket!.on('call:accepted', _onCallAccepted);
     _socket!.on('call:rejected', _onCallRejected);
     _socket!.on('call:ended', _onCallEnded);
     _socket!.on('call:signal', _onCallSignal);
+
+    _socket!.on('friend:accepted', (data) {
+      _socket!.emit('conversation:list');
+      notifyListeners();
+    });
 
     _socket!.connect();
 

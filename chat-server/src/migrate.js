@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS calls (
   room_id VARCHAR(36),
   status VARCHAR(10) NOT NULL DEFAULT 'missed',
   started_at TIMESTAMP,
-  ended_at TIMESTAMP DEFAULT NOW()
+  ended_at TIMESTAMP
 );
 
 -- 10. devices

@@ -1,13 +1,20 @@
 // chat_app/lib/screens/chat_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:io';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import '../services/socket_service.dart';
+import '../services/api_service.dart';
+import '../config.dart';
 import 'call_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final int conversationId;
   final String convName;
-  const ChatScreen({super.key, required this.conversationId, required this.convName});
+  final int? otherUserId;
+  const ChatScreen({super.key, required this.conversationId, required this.convName, this.otherUserId});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -16,6 +23,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
+  bool _shouldAutoScroll = true;
 
   @override
   void initState() {
@@ -36,7 +44,16 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty) return;
     context.read<SocketService>().sendMessage(conversationId: widget.conversationId, content: text);
     _msgCtrl.clear();
+    _shouldAutoScroll = true;
     _scrollToBottom();
+  }
+
+  String _formatMsgTime(DateTime dt) {
+    final now = DateTime.now();
+    if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    }
+    return '${dt.month}/${dt.day} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
   void _scrollToBottom() {
@@ -48,10 +65,46 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  Future<void> _pickAndSendImage() async {
+    final picker = ImagePicker();
+    final XFile? image = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85, maxWidth: 1080);
+    if (image == null) return;
+
+    final uri = Uri.parse('${AppConfig.serverUrl}/api/upload');
+    final request = http.MultipartRequest('POST', uri);
+    request.headers['Authorization'] = 'Bearer ${ApiService.token}';
+    request.files.add(await http.MultipartFile.fromPath('file', image.path));
+
+    final response = await request.send();
+    final body = await response.stream.bytesToString();
+    final data = _parseJson(body);
+
+    if (data != null && data['code'] == 0 && data['data'] != null) {
+      final url = data['data']['url'];
+      context.read<SocketService>().sendMessage(
+        conversationId: widget.conversationId, content: url, type: 'image');
+    } else {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('图片上传失败'), behavior: SnackBarBehavior.floating));
+    }
+  }
+
+  Map<String, dynamic>? _parseJson(String s) {
+    try { return jsonDecode(s) as Map<String, dynamic>; } catch (_) { return null; }
+  }
+
   void _startCall(String type) {
+    final otherId = widget.otherUserId;
+    if (otherId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无法获取对方信息'), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+    context.read<SocketService>().startCall(calleeId: otherId, type: type);
     Navigator.push(context, MaterialPageRoute(
       builder: (_) => CallScreen(
-        calleeId: widget.conversationId, // simplified — needs actual userId from conversation
+        calleeId: otherId,
         calleeName: widget.convName,
         type: type,
         isIncoming: false,
@@ -77,14 +130,19 @@ class _ChatScreenState extends State<ChatScreen> {
               if (msgs.isEmpty) {
                 return const Center(child: Text('发送第一条消息吧', style: TextStyle(color: Colors.grey)));
               }
-              Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+              if (_shouldAutoScroll) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _scrollToBottom();
+                  _shouldAutoScroll = false;
+                });
+              }
               return ListView.builder(
                 controller: _scrollCtrl,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 itemCount: msgs.length,
                 itemBuilder: (_, i) {
                   final msg = msgs[i];
-                  final isMe = msg.senderId == (socket.chatPartner?.id ?? 0);
+                  final isMe = msg.senderId == ApiService.userId;
                   if (msg.isRecalled) {
                     return const Center(child: Padding(
                       padding: EdgeInsets.all(8),
@@ -95,9 +153,16 @@ class _ChatScreenState extends State<ChatScreen> {
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Row(
                       mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
+                        if (!isMe) ...[
+                          CircleAvatar(radius: 14, backgroundColor: const Color(0xFFDBE1FF),
+                            child: Text(widget.convName.isNotEmpty ? widget.convName[0] : '?', style: const TextStyle(fontSize: 11, color: Color(0xFF2563EB)))),
+                          const SizedBox(width: 8),
+                        ],
                         Flexible(
                           child: Container(
+                            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                             decoration: BoxDecoration(
                               color: isMe ? const Color(0xFF2563EB) : const Color(0xFFDCE9FF),
@@ -107,7 +172,29 @@ class _ChatScreenState extends State<ChatScreen> {
                                 bottomRight: Radius.circular(isMe ? 2 : 16),
                               ),
                             ),
-                            child: Text(msg.content, style: TextStyle(fontSize: 15, color: isMe ? Colors.white : const Color(0xFF0B1C30))),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                              if (msg.type == 'image')
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(
+                                    '${AppConfig.serverUrl}${msg.content}',
+                                    width: 200, fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 60, color: Colors.white54),
+                                  ),
+                                )
+                              else
+                                Text(msg.content, style: TextStyle(fontSize: 15, color: isMe ? Colors.white : const Color(0xFF0B1C30))),
+                              const SizedBox(height: 4),
+                              Row(mainAxisSize: MainAxisSize.min, children: [
+                                Text(_formatMsgTime(msg.createdAt),
+                                  style: TextStyle(fontSize: 10, color: isMe ? Colors.white54 : const Color(0xFF737686))),
+                                if (isMe) ...[
+                                  const SizedBox(width: 4),
+                                  Icon(msg.isRead ? Icons.done_all : Icons.done, size: 14,
+                                    color: msg.isRead ? Colors.white : Colors.white54),
+                                ],
+                              ]),
+                            ]),
                           ),
                         ),
                       ],
@@ -125,6 +212,11 @@ class _ChatScreenState extends State<ChatScreen> {
             BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, -1)),
           ]),
           child: SafeArea(child: Row(children: [
+            IconButton(
+              icon: const Icon(Icons.image_outlined, color: Color(0xFF2563EB), size: 24),
+              onPressed: _pickAndSendImage,
+              splashRadius: 18,
+            ),
             Expanded(
               child: Container(
                 decoration: BoxDecoration(

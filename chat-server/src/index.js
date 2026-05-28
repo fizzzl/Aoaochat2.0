@@ -35,6 +35,7 @@ async function main() {
   app.use(cors());
   app.use(express.json());
   app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+  app.use(express.static(path.join(__dirname, '..', 'public')));
 
   // ═══════════ REST API ═══════════
 
@@ -150,6 +151,18 @@ async function main() {
       [req.user.userId]
     );
     res.json({ code: 0, data: requests });
+  });
+
+  // 通话记录
+  app.get('/api/calls', authMiddleware, async (req, res) => {
+    const calls = await db.getAll(
+      `SELECT id, caller_id AS "callerId", callee_id AS "calleeId", type,
+              room_id AS "roomId", status, started_at AS "startedAt", ended_at AS "endedAt"
+       FROM calls WHERE caller_id = $1 OR callee_id = $1
+       ORDER BY COALESCE(started_at, ended_at) DESC LIMIT 50`,
+      [req.user.userId]
+    );
+    res.json({ code: 0, data: calls });
   });
 
   // 会话
