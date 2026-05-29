@@ -4,6 +4,8 @@ import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:provider/provider.dart';
 import '../services/socket_service.dart';
 import '../services/api_service.dart';
+import '../models/conversation.dart';
+import 'chat_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key});
@@ -55,6 +57,23 @@ class _ContactsScreenState extends State<ContactsScreen> {
     _loadFriends();
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('已删除好友'), behavior: SnackBarBehavior.floating));
+  }
+
+  void _startChat(Map<String, dynamic> friend) async {
+    final res = await ApiService.post('/api/conversations', body: {'userId': friend['id']});
+    if (res['code'] == 0 && res['data'] != null) {
+      final convId = res['data']['id'] as int;
+      final name = friend['display_name']?.toString() ?? friend['displayName']?.toString() ?? '';
+      final socket = context.read<SocketService>();
+      socket.getHistory(conversationId: convId);
+      socket.loadConversations(); // 刷新会话列表
+      if (mounted) Navigator.push(context, MaterialPageRoute(
+        builder: (_) => ChangeNotifierProvider<SocketService>.value(
+          value: socket,
+          child: ChatScreen(conversationId: convId, convName: name, otherUserId: friend['id'] as int),
+        ),
+      ));
+    }
   }
 
   void _acceptFriend(int friendId) async {
@@ -153,6 +172,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                           icon: Icons.person_remove_outlined, label: '删除'),
                       ]),
                       child: ListTile(
+                        onTap: () => _startChat(f),
                         leading: Stack(children: [
                           CircleAvatar(backgroundColor: const Color(0xFFDBE1FF),
                             child: Text((f['display_name']?.toString() ?? '?')[0], style: const TextStyle(color: Color(0xFF2563EB)))),

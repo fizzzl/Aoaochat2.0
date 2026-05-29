@@ -94,7 +94,9 @@ class ApiService {
         await prefs.setString('refreshToken', _refreshToken!);
         return _request(method, path, body: body);
       } else {
-        await logout();
+        // 刷新失败时不清空本地数据，仅清除内存中的 token
+        _token = null;
+        _refreshToken = null;
       }
     }
     return data;

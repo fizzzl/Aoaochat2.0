@@ -1,7 +1,6 @@
 // chat_app/lib/screens/splash_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import 'home_screen.dart';
@@ -21,49 +20,30 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _init() async {
-    // FCM 注册（后台静默，不阻塞启动）
-    _registerFcm();
-
-    // 验证保存的 token 是否有效（避免残留旧 token 导致串号）
-    final saved = await ApiService.loadSession();
-    bool valid = false;
-    if (saved && ApiService.refreshToken != null) {
-      try {
-        final r = await ApiService.post('/api/auth/refresh', body: {'refreshToken': ApiService.refreshToken});
-        if (r['code'] == 0 && r['data'] != null) {
-          await ApiService.saveSession(r['data']);
-          valid = true;
-        }
-      } catch (_) {}
-    }
+    // 加载本地保存的 token（不验证有效性）
+    final loggedIn = await ApiService.loadSession();
 
     if (!mounted) return;
-    if (valid) {
+    if (loggedIn) {
+      // 有本地 token，直接进主页
       Navigator.pushAndRemoveUntil(context, MaterialPageRoute(
         builder: (_) => ChangeNotifierProvider(
           create: (_) {
             final s = SocketService();
             s.connect();
+            // 登录后加载会话列表
+            Future.delayed(const Duration(milliseconds: 500), () {
+              s.loadConversations();
+            });
             return s;
           },
           child: const HomeScreen(),
         ),
       ), (_) => false);
     } else {
-      await ApiService.logout();
+      // 没有 token，去登录页
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen()));
     }
-  }
-
-  Future<void> _registerFcm() async {
-    try {
-      final fcmToken = await FirebaseMessaging.instance.getToken().timeout(const Duration(seconds: 5));
-      if (fcmToken != null) {
-        await ApiService.post('/api/devices', body: {
-          'platform': 'android', 'pushToken': fcmToken,
-        }).timeout(const Duration(seconds: 3));
-      }
-    } catch (_) {}
   }
 
   @override

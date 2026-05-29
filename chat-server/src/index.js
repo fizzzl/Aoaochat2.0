@@ -166,6 +166,39 @@ async function main() {
     res.json({ code: 0, data: calls });
   });
 
+  // 创建或获取私聊会话
+  app.post('/api/conversations', authMiddleware, async (req, res) => {
+    const { userId: otherUserId } = req.body;
+    if (!otherUserId) return res.status(400).json({ code: 20005, message: '缺少对方用户ID' });
+
+    // 查找是否存在私聊会话
+    const existing = await db.getOne(
+      `SELECT c.id FROM conversations c
+       JOIN conversation_members cm1 ON c.id = cm1.conversation_id AND cm1.user_id = $1
+       JOIN conversation_members cm2 ON c.id = cm2.conversation_id AND cm2.user_id = $2
+       WHERE c.type = 'private'`,
+      [req.user.userId, otherUserId]
+    );
+    if (existing) {
+      // 如果用户被移除过，重新加入
+      await db.run(
+        'INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [existing.id, req.user.userId]
+      );
+      return res.json({ code: 0, data: { id: existing.id } });
+    }
+
+    // 创建新会话
+    const conv = await db.getOne(
+      `INSERT INTO conversations (type) VALUES ('private') RETURNING id`, []
+    );
+    await db.run(
+      'INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2), ($1, $3)',
+      [conv.id, req.user.userId, otherUserId]
+    );
+    res.json({ code: 0, data: { id: conv.id } });
+  });
+
   // 删除会话
   app.delete('/api/conversations/:id', authMiddleware, async (req, res) => {
     await db.run(

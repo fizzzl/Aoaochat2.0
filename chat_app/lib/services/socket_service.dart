@@ -86,14 +86,14 @@ class SocketService extends ChangeNotifier {
     _socket!.on('message:new', (data) {
       final msg = Message.fromJson(data);
       _messages.putIfAbsent(msg.conversationId, () => []).add(msg);
-      // Refresh conversation list
-      _socket!.emit('conversation:list');
+      loadConversations(); // 刷新会话列表
       notifyListeners();
     });
 
     _socket!.on('message:sent', (data) {
       final msg = Message.fromJson(data);
       _messages.putIfAbsent(msg.conversationId, () => []).add(msg);
+      loadConversations(); // 发送后刷新会话列表
       notifyListeners();
     });
 
