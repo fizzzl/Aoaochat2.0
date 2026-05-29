@@ -13,6 +13,7 @@ const { socketAuth } = require('./middleware/socketAuth');
 const { loginLimiter } = require('./middleware/rateLimiter');
 const { setupSocket } = require('./socket');
 const { upload, handleUpload, handleAvatarUpload } = require('./upload');
+const multer = require('multer');
 const { initFCM, sendPush } = require('./push');
 const db = require('./db');
 const logger = require('./logger');
@@ -156,10 +157,15 @@ async function main() {
   // 通话记录
   app.get('/api/calls', authMiddleware, async (req, res) => {
     const calls = await db.getAll(
-      `SELECT id, caller_id AS "callerId", callee_id AS "calleeId", type,
-              room_id AS "roomId", status, started_at AS "startedAt", ended_at AS "endedAt"
-       FROM calls WHERE caller_id = $1 OR callee_id = $1
-       ORDER BY COALESCE(started_at, ended_at) DESC LIMIT 50`,
+      `SELECT c.id, c.caller_id AS "callerId", c.callee_id AS "calleeId",
+              cu.display_name AS "callerName", cu2.display_name AS "calleeName",
+              c.type, c.room_id AS "roomId", c.status,
+              c.started_at AS "startedAt", c.ended_at AS "endedAt"
+       FROM calls c
+       JOIN users cu ON c.caller_id = cu.id
+       JOIN users cu2 ON c.callee_id = cu2.id
+       WHERE c.caller_id = $1 OR c.callee_id = $1
+       ORDER BY COALESCE(c.started_at, c.ended_at) DESC LIMIT 50`,
       [req.user.userId]
     );
     res.json({ code: 0, data: calls });
@@ -296,6 +302,16 @@ async function main() {
   });
   io.use(socketAuth);
   setupSocket(io);
+
+  // ═══════════ 全局错误处理 ═══════════
+  app.use((err, req, res, next) => {
+    if (err instanceof multer.MulterError) {
+      return res.status(400).json({ code: 23003, message: err.code === 'LIMIT_FILE_SIZE' ? '文件超过限制(10MB)' : '文件上传错误' });
+    }
+    if (err) {
+      res.status(500).json({ code: 50000, message: err.message || '服务器内部错误' });
+    }
+  });
 
   // ═══════════ 启动 ═══════════
   server.listen(PORT, () => {

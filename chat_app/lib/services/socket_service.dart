@@ -131,6 +131,16 @@ class SocketService extends ChangeNotifier {
       }
     });
 
+    _socket!.on('typing:update', (data) {
+      final convId = data['conversationId'] as int? ?? 0;
+      _typingConversations.add(convId);
+      notifyListeners();
+      Future.delayed(const Duration(seconds: 3), () {
+        _typingConversations.remove(convId);
+        notifyListeners();
+      });
+    });
+
     _socket!.on('call:incoming', _onCallIncoming);
     _socket!.on('call:accepted', _onCallAccepted);
     _socket!.on('call:rejected', _onCallRejected);
@@ -215,6 +225,15 @@ class SocketService extends ChangeNotifier {
   void sendSignal({required int toUserId, required Map<String, dynamic> signal}) {
     _socket?.emit('call:signal', {'toUserId': toUserId, 'signal': signal});
   }
+
+  // 正在输入
+  final Set<int> _typingConversations = {};
+
+  void sendTyping(int conversationId) {
+    _socket?.emit('conversation:typing', {'conversationId': conversationId});
+  }
+
+  bool isOtherTyping(int conversationId) => _typingConversations.contains(conversationId);
 
   // Callbacks for call events — overridden by CallScreen
   Function(Map<String, dynamic>)? onCallIncoming;

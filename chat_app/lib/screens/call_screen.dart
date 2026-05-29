@@ -103,17 +103,29 @@ class _CallScreenState extends State<CallScreen> {
       };
       _pc = await createPeerConnection(config);
 
-      _localStream = await navigator.mediaDevices.getUserMedia({
-        'audio': true, 'video': widget.type == 'video',
-      });
-      _pc!.addStream(_localStream!);
+      try {
+        _localStream = await navigator.mediaDevices.getUserMedia({
+          'audio': true, 'video': widget.type == 'video',
+        });
+        _localStream!.getTracks().forEach((track) {
+          _pc!.addTrack(track, _localStream!);
+        });
+      } catch (e) {
+        if (mounted) setState(() => _status = '麦克风/摄像头不可用');
+        return;
+      }
+
+      final otherId = widget.isIncoming ? widget.callerId : widget.calleeId;
+      if (otherId == null) {
+        if (mounted) setState(() => _status = '无法获取对方信息');
+        return;
+      }
 
       final socket = context.read<SocketService>();
 
       _pc!.onIceCandidate = (candidate) {
         if (candidate.candidate != null) {
-          final otherId = widget.isIncoming ? widget.callerId : widget.calleeId;
-          socket.sendSignal(toUserId: otherId!, signal: {
+          socket.sendSignal(toUserId: otherId, signal: {
             'type': 'candidate',
             'candidate': candidate.candidate,
             'sdpMid': candidate.sdpMid,
@@ -122,7 +134,7 @@ class _CallScreenState extends State<CallScreen> {
         }
       };
 
-      _pc!.onAddStream = (stream) {
+      _pc!.onTrack = (event) {
         setState(() { _connected = true; _status = '通话中'; });
       };
 

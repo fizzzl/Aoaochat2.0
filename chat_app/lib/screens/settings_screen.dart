@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../config.dart';
+import 'profile_screen.dart';
 import 'auth_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -19,7 +20,8 @@ class SettingsScreen extends StatelessWidget {
             leading: const Icon(Icons.person),
             title: Text(ApiService.displayName ?? ApiService.username ?? '未登录'),
             subtitle: Text('@${ApiService.username ?? ''}'),
-          ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen()))),
           const Divider(),
           ListTile(leading: const Icon(Icons.info_outline), title: const Text('版本'), subtitle: Text('v${AppConfig.appVersion}')),
           const Divider(),

@@ -1,10 +1,15 @@
 // chat_app/lib/main.dart — 嗷嗷聊天二代 App 入口
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'config.dart';
 import 'screens/splash_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Firebase 初始化失败不阻塞启动
+  try {
+    await Firebase.initializeApp().timeout(const Duration(seconds: 5));
+  } catch (_) {}
   runApp(const ChatApp());
 }
 
