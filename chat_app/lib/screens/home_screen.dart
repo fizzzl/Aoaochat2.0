@@ -61,7 +61,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: [
-        const ConversationListScreen(),
+        ConversationListScreen(onAddFriend: () => setState(() => _currentIndex = 2)),
         CallsHistoryScreen(calls: _calls.isEmpty ? null : _calls),
         const ContactsScreen(),
         const SettingsScreen(),

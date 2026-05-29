@@ -24,9 +24,21 @@ class _SplashScreenState extends State<SplashScreen> {
     // FCM 注册（后台静默，不阻塞启动）
     _registerFcm();
 
-    final loggedIn = await ApiService.loadSession();
+    // 验证保存的 token 是否有效（避免残留旧 token 导致串号）
+    final saved = await ApiService.loadSession();
+    bool valid = false;
+    if (saved && ApiService.refreshToken != null) {
+      try {
+        final r = await ApiService.post('/api/auth/refresh', body: {'refreshToken': ApiService.refreshToken});
+        if (r['code'] == 0 && r['data'] != null) {
+          await ApiService.saveSession(r['data']);
+          valid = true;
+        }
+      } catch (_) {}
+    }
+
     if (!mounted) return;
-    if (loggedIn) {
+    if (valid) {
       Navigator.pushAndRemoveUntil(context, MaterialPageRoute(
         builder: (_) => ChangeNotifierProvider(
           create: (_) {
@@ -38,6 +50,7 @@ class _SplashScreenState extends State<SplashScreen> {
         ),
       ), (_) => false);
     } else {
+      await ApiService.logout();
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen()));
     }
   }

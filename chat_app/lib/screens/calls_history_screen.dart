@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import '../models/call.dart';
 import '../services/api_service.dart';
+import '../utils/time_format.dart';
 
 class CallsHistoryScreen extends StatelessWidget {
   final List<Call>? calls;
@@ -13,14 +14,11 @@ class CallsHistoryScreen extends StatelessWidget {
     return (c.callerId == myId) ? (c.calleeName ?? '未知') : (c.callerName ?? '未知');
   }
 
-  Widget _statusIcon(Call c) {
+  String _callLabel(Call c) {
     final isIncoming = ApiService.userId != null && c.calleeId == ApiService.userId;
-    if (c.status == 'missed' || c.status == 'cancelled') {
-      return Icon(isIncoming ? Icons.call_missed : Icons.call_missed_outgoing,
-        color: Colors.red, size: 22);
-    }
-    return Icon(isIncoming ? Icons.call_received : Icons.call_made,
-      color: const Color(0xFF2563EB), size: 22);
+    final base = isIncoming ? '呼入' : '呼出';
+    final type = c.type == 'video' ? '视频' : '语音';
+    return '$type$base';
   }
 
   @override
@@ -28,45 +26,34 @@ class CallsHistoryScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('通话记录')),
       body: calls == null || calls!.isEmpty
-        ? Center(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.call_outlined, size: 56, color: const Color(0xFF2563EB).withValues(alpha: 0.15)),
-              const SizedBox(height: 12),
-              const Text('暂无通话记录', style: TextStyle(color: Colors.grey)),
-              const SizedBox(height: 4),
-              const Text('去聊天页发起通话吧', style: TextStyle(color: Colors.grey, fontSize: 12)),
-            ]),
-          )
+        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.call_outlined, size: 56, color: const Color(0xFF2563EB).withValues(alpha: 0.15)),
+            const SizedBox(height: 12),
+            const Text('暂无通话记录', style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 4),
+            const Text('去聊天页发起通话吧', style: TextStyle(color: Colors.grey, fontSize: 12)),
+          ]))
         : ListView.builder(
             itemCount: calls!.length,
             itemBuilder: (_, i) {
               final c = calls![i];
               final isIncoming = ApiService.userId != null && c.calleeId == ApiService.userId;
               final name = _otherName(c);
+              final missed = c.status == 'missed' || c.status == 'cancelled';
               return ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: (c.status == 'missed' || c.status == 'cancelled')
-                    ? const Color(0xFFFEE2E2) : const Color(0xFFDBE1FF),
-                  child: _statusIcon(c),
+                  backgroundColor: missed ? const Color(0xFFFEE2E2) : const Color(0xFFDBE1FF),
+                  child: Icon(
+                    missed ? Icons.call_missed : (isIncoming ? Icons.call_received : Icons.call_made),
+                    color: missed ? Colors.red : const Color(0xFF2563EB), size: 20),
                 ),
                 title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: Row(children: [
-                  Text(isIncoming ? '呼入 ' : '呼出 ',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                  Icon(c.type == 'video' ? Icons.videocam : Icons.call,
-                    size: 14, color: Colors.grey),
-                  if (c.durationText.isNotEmpty) ...[
-                    const SizedBox(width: 4),
-                    Text(c.durationText, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                  ],
-                ]),
+                subtitle: Text(
+                  '${_callLabel(c)} · ${c.durationText.isNotEmpty ? c.durationText : (missed ? "未接" : "")}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                 trailing: Text(
-                  c.status == 'answered' ? c.durationText : (c.status == 'missed' ? '未接' : '已取消'),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: c.status == 'missed' ? Colors.red : Colors.grey,
-                  ),
-                ),
+                  c.endedAt != null ? formatConversationTime(c.endedAt) : '',
+                  style: const TextStyle(fontSize: 11, color: Colors.grey)),
               );
             },
           ),

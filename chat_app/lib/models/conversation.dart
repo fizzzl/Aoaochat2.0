@@ -9,6 +9,7 @@ class Conversation {
   final String? lastMessage;
   final DateTime? lastMessageTime;
   final int unreadCount;
+  bool isPinned;
 
   Conversation({
     required this.id,
@@ -20,6 +21,7 @@ class Conversation {
     this.lastMessage,
     this.lastMessageTime,
     this.unreadCount = 0,
+    this.isPinned = false,
   });
 
   factory Conversation.fromJson(Map<String, dynamic> json) => Conversation(

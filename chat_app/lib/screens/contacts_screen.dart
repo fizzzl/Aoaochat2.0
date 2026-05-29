@@ -1,9 +1,9 @@
 // chat_app/lib/screens/contacts_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:provider/provider.dart';
 import '../services/socket_service.dart';
 import '../services/api_service.dart';
-import '../models/user.dart';
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key});
@@ -20,58 +20,53 @@ class _ContactsScreenState extends State<ContactsScreen> {
   String _statusMsg = '';
 
   @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
-  }
+  void dispose() { _searchCtrl.dispose(); super.dispose(); }
 
   @override
-  void initState() {
-    super.initState();
-    _loadFriends();
-  }
+  void initState() { super.initState(); _loadFriends(); }
 
   Future<void> _loadFriends() async {
     final data = await ApiService.get('/api/friends');
-    if (data['code'] == 0) {
-      setState(() => _friends = List<Map<String, dynamic>>.from(data['data'] ?? []));
-    }
+    if (data['code'] == 0) setState(() => _friends = List<Map<String, dynamic>>.from(data['data'] ?? []));
     final reqData = await ApiService.get('/api/friends/requests');
-    if (reqData['code'] == 0) {
-      setState(() => _requests = List<Map<String, dynamic>>.from(reqData['data'] ?? []));
-    }
+    if (reqData['code'] == 0) setState(() => _requests = List<Map<String, dynamic>>.from(reqData['data'] ?? []));
   }
 
   Future<void> _search(String q) async {
-    if (q.trim().isEmpty) {
-      setState(() { _searchResults = []; _statusMsg = ''; });
-      return;
-    }
+    if (q.trim().isEmpty) { setState(() { _searchResults = []; _statusMsg = ''; }); return; }
     setState(() => _loading = true);
     final data = await ApiService.get('/api/users/search?q=${Uri.encodeComponent(q.trim())}');
     if (data['code'] == 0) {
-      setState(() {
-        _searchResults = List<Map<String, dynamic>>.from(data['data'] ?? []);
-        _statusMsg = _searchResults.isEmpty ? '未找到用户' : '';
-      });
+      setState(() { _searchResults = List<Map<String, dynamic>>.from(data['data'] ?? []); _statusMsg = _searchResults.isEmpty ? '未找到用户' : ''; });
     }
     setState(() => _loading = false);
   }
 
-  Future<void> _addFriend(int friendId, String name) async {
+  bool _isFriend(int id) => _friends.any((f) => f['id'] == id);
+
+  void _addFriend(int friendId, String name) {
     context.read<SocketService>().addFriend(friendId);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已发送好友请求给 $name'), behavior: SnackBarBehavior.floating),
-    );
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已发送好友请求给 $name'), behavior: SnackBarBehavior.floating));
   }
 
-  Future<void> _acceptFriend(int friendId) async {
+  void _removeFriend(int friendId) {
+    context.read<SocketService>().removeFriend(friendId);
+    _loadFriends();
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已删除好友'), behavior: SnackBarBehavior.floating));
+  }
+
+  void _acceptFriend(int friendId) async {
     context.read<SocketService>().acceptFriend(friendId);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已接受好友请求'), behavior: SnackBarBehavior.floating),
-    );
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已接受好友请求'), behavior: SnackBarBehavior.floating));
     await Future.delayed(const Duration(milliseconds: 500));
     _loadFriends();
+  }
+
+  bool _isOnline(Map<String, dynamic> friend, Set<int> onlineIds) {
+    return onlineIds.contains(friend['id']);
   }
 
   @override
@@ -79,98 +74,109 @@ class _ContactsScreenState extends State<ContactsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('联系人')),
       body: Column(children: [
-        // Search bar
-        Padding(
-          padding: const EdgeInsets.all(12),
+        Padding(padding: const EdgeInsets.all(12),
           child: TextField(
             controller: _searchCtrl,
             decoration: InputDecoration(
-              hintText: '搜索用户名或昵称添加好友',
+              hintText: '搜索用户名或昵称',
               prefixIcon: const Icon(Icons.search),
               suffixIcon: _searchCtrl.text.isNotEmpty
                 ? IconButton(icon: const Icon(Icons.clear), onPressed: () { _searchCtrl.clear(); _search(''); })
                 : null,
-              filled: true,
-              fillColor: const Color(0xFFEFF4FF),
+              filled: true, fillColor: const Color(0xFFEFF4FF),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
             ),
             onChanged: _search,
           ),
         ),
-
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            children: [
-              // Search results
-              if (_searchCtrl.text.isNotEmpty) ...[
-                if (_loading)
-                  const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()))
-                else if (_statusMsg.isNotEmpty)
-                  Padding(padding: const EdgeInsets.all(16), child: Text(_statusMsg, style: const TextStyle(color: Colors.grey)))
-                else
-                  ..._searchResults.map((u) => _userTile(u, isSearchResult: true)),
-                const Divider(),
-              ],
+          child: Consumer<SocketService>(
+            builder: (_, socket, __) {
+              final onlineIds = socket.onlineUsers.map((u) => u.id).toSet();
 
-              // Pending requests
-              if (_requests.isNotEmpty) ...[
-                const Padding(
-                  padding: EdgeInsets.only(top: 8, bottom: 4),
-                  child: Text('好友请求', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF737686))),
-                ),
-                ..._requests.map((r) => ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: const Color(0xFFDBE1FF),
-                    child: Text((r['display_name']?.toString() ?? '?')[0], style: const TextStyle(color: Color(0xFF2563EB))),
-                  ),
-                  title: Text(r['display_name']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text('@${r['username']}', style: const TextStyle(fontSize: 12)),
-                  trailing: ElevatedButton(
-                    onPressed: () => _acceptFriend(r['id'] as int),
-                    style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12), minimumSize: const Size(0, 32)),
-                    child: const Text('接受'),
-                  ),
-                )),
-                const Divider(),
-              ],
+              // Sort friends: online first, then by name
+              final sortedFriends = List<Map<String, dynamic>>.from(_friends)
+                ..sort((a, b) {
+                  final aOnline = _isOnline(a, onlineIds);
+                  final bOnline = _isOnline(b, onlineIds);
+                  if (aOnline != bOnline) return aOnline ? -1 : 1;
+                  return (a['display_name']?.toString() ?? '').compareTo(b['display_name']?.toString() ?? '');
+                });
 
-              // Friends list
-              if (_friends.isNotEmpty) ...[
-                const Padding(
-                  padding: EdgeInsets.only(top: 8, bottom: 4),
-                  child: Text('我的好友', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF737686))),
-                ),
-                ..._friends.map((f) => _userTile(f)),
-              ] else if (_searchCtrl.text.isEmpty && _requests.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(32),
-                  child: Center(child: Text('暂无好友，搜索添加吧', style: TextStyle(color: Colors.grey))),
-                ),
-            ],
+              return ListView(padding: const EdgeInsets.symmetric(horizontal: 12), children: [
+                if (_searchCtrl.text.isNotEmpty) ...[
+                  if (_loading)
+                    const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()))
+                  else if (_statusMsg.isNotEmpty)
+                    Padding(padding: const EdgeInsets.all(16), child: Text(_statusMsg, style: const TextStyle(color: Colors.grey)))
+                  else
+                    ..._searchResults.map((u) => ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: const Color(0xFFDBE1FF),
+                        child: Text((u['display_name']?.toString() ?? '?')[0], style: const TextStyle(color: Color(0xFF2563EB)))),
+                      title: Text(u['display_name']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text('@${u['username']}', style: const TextStyle(fontSize: 12)),
+                      trailing: _isFriend(u['id'])
+                        ? const Text('已是好友', style: TextStyle(color: Colors.grey, fontSize: 12))
+                        : ElevatedButton(
+                            onPressed: () => _addFriend(u['id'] as int, u['display_name']?.toString() ?? ''),
+                            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12), minimumSize: const Size(0, 32)),
+                            child: const Text('添加')),
+                    )),
+                  const Divider(),
+                ],
+                if (_requests.isNotEmpty) ...[
+                  Padding(padding: const EdgeInsets.only(top: 8, bottom: 4),
+                    child: Text('好友请求 (${_requests.length})', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF737686)))),
+                  ..._requests.map((r) => ListTile(
+                    leading: CircleAvatar(backgroundColor: const Color(0xFFDBE1FF),
+                      child: Text((r['display_name']?.toString() ?? '?')[0], style: const TextStyle(color: Color(0xFF2563EB)))),
+                    title: Text(r['display_name']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: Text('@${r['username']}', style: const TextStyle(fontSize: 12)),
+                    trailing: ElevatedButton(
+                      onPressed: () => _acceptFriend(r['id'] as int),
+                      style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12), minimumSize: const Size(0, 32)),
+                      child: const Text('接受')),
+                  )),
+                  const Divider(),
+                ],
+                if (sortedFriends.isNotEmpty) ...[
+                  Padding(padding: const EdgeInsets.only(top: 8, bottom: 4),
+                    child: Text('我的好友 (${sortedFriends.length})', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF737686)))),
+                  ...sortedFriends.map((f) {
+                    final online = _isOnline(f, onlineIds);
+                    return Slidable(
+                      endActionPane: ActionPane(motion: const BehindMotion(), children: [
+                        SlidableAction(
+                          onPressed: (_) => _removeFriend(f['id'] as int),
+                          backgroundColor: Colors.red, foregroundColor: Colors.white,
+                          icon: Icons.person_remove_outlined, label: '删除'),
+                      ]),
+                      child: ListTile(
+                        leading: Stack(children: [
+                          CircleAvatar(backgroundColor: const Color(0xFFDBE1FF),
+                            child: Text((f['display_name']?.toString() ?? '?')[0], style: const TextStyle(color: Color(0xFF2563EB)))),
+                          if (online) Positioned(bottom: 0, right: 0, child: Container(
+                            width: 12, height: 12,
+                            decoration: BoxDecoration(color: const Color(0xFF22C55E), shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2)))),
+                        ]),
+                        title: Row(children: [
+                          Text(f['display_name']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
+                          if (online) ...[const SizedBox(width: 6), const Text('在线', style: TextStyle(fontSize: 11, color: Color(0xFF22C55E)))],
+                        ]),
+                        subtitle: Text('@${f['username']}', style: const TextStyle(fontSize: 12)),
+                      ),
+                    );
+                  }),
+                ] else if (_searchCtrl.text.isEmpty && _requests.isEmpty)
+                  const Padding(padding: EdgeInsets.all(32),
+                    child: Center(child: Text('暂无好友，搜索添加吧', style: TextStyle(color: Colors.grey)))),
+              ]);
+            },
           ),
         ),
       ]),
-    );
-  }
-
-  Widget _userTile(Map<String, dynamic> u, {bool isSearchResult = false}) {
-    final name = u['display_name']?.toString() ?? u['displayName']?.toString() ?? '';
-    final username = u['username']?.toString() ?? '';
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: const Color(0xFFDBE1FF),
-        child: Text(name.isNotEmpty ? name[0] : '?', style: const TextStyle(color: Color(0xFF2563EB))),
-      ),
-      title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text('@$username', style: const TextStyle(fontSize: 12)),
-      trailing: isSearchResult
-        ? ElevatedButton(
-            onPressed: () => _addFriend(u['id'] as int, name),
-            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12), minimumSize: const Size(0, 32)),
-            child: const Text('添加'),
-          )
-        : null,
     );
   }
 }

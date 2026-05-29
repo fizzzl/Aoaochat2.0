@@ -6,11 +6,13 @@ const { sendPush } = require('./push');
 const onlineUsers = new Map();   // userId -> { status, displayName }
 const userSockets = new Map();   // userId -> Set<socketId>
 const activeCalls = new Map();   // userId -> roomId
+const rateLimit = new Map();     // event:userId -> count
 
 function setupSocket(io) {
   io.on('connection', async (socket) => {
     const { userId, username } = socket;
     logger.info('Socket 连接', { userId, username });
+    console.log(`[D] Socket connect: userId=${userId} username=${username}`);
 
     // 加入房间
     socket.join(`user:${userId}`);
@@ -32,12 +34,33 @@ function setupSocket(io) {
 
     broadcastOnlineUsers(io);
 
+    function checkRate(event) {
+      const key = `${event}:${userId}`;
+      const now = Date.now();
+      const entry = rateLimit.get(key);
+      if (entry && now - entry.time < 1000) {
+        if (entry.count >= 10) {
+          socket.emit('error', { code: 22010, message: '操作太频繁' });
+          return false;
+        }
+        entry.count++;
+      } else {
+        rateLimit.set(key, { time: now, count: 1 });
+      }
+      return true;
+    }
+
     // ═══════════ 消息 ═══════════
     socket.on('message:send', async (data) => {
       try {
         const { conversationId, content, type = 'text', tempId } = data;
         if (!conversationId || !content?.trim()) {
           return socket.emit('error', { code: 22002, message: '参数不完整' });
+        }
+        // 拒绝前端传的 senderId 与连接用户不匹配
+        if (data.senderId && data.senderId !== userId) {
+          logger.warn('串号拦截', { fromSocket: userId, claimedSender: data.senderId });
+          return socket.emit('error', { code: 22011, message: '用户身份异常' });
         }
         if (content.length > 5000) {
           return socket.emit('error', { code: 22003, message: '消息过长（上限 5000 字符）' });
@@ -171,6 +194,7 @@ function setupSocket(io) {
 
     socket.on('conversation:list', async () => {
       try {
+        console.log(`[D] conversation:list for userId=${userId}`);
         const convs = await db.getAll(
           `SELECT c.id, c.type, c.name, c.last_message, c.last_message_time,
                   cm.unread_count,
@@ -243,6 +267,7 @@ function setupSocket(io) {
     // ═══════════ 好友 ═══════════
     socket.on('friend:add', async (data) => {
       try {
+        if (!checkRate('friend:add')) return;
         const { friendId } = data;
         if (friendId === userId) {
           return socket.emit('error', { code: 21002, message: '不能添加自己' });
@@ -333,6 +358,7 @@ function setupSocket(io) {
     // ═══════════ 通话 ═══════════
     socket.on('call:start', async (data) => {
       try {
+        if (!checkRate('call:start')) return;
         const { calleeId, type = 'voice' } = data;
         // 忙线检测
         if (activeCalls.has(calleeId)) {
@@ -363,14 +389,18 @@ function setupSocket(io) {
 
     socket.on('call:accept', async (data) => {
       const { roomId } = data;
+      const call = await db.getOne(
+        'SELECT caller_id, callee_id FROM calls WHERE room_id = $1', [roomId]
+      );
+      if (!call) return;
+      if (call.callee_id !== userId) {
+        return socket.emit('call:rejected', { reason: 'not_for_you' });
+      }
       activeCalls.set(userId, roomId);
       await db.run(
         `UPDATE calls SET status = 'answered', started_at = NOW()
          WHERE room_id = $1 AND status = 'missed'`,
         [roomId]
-      );
-      const call = await db.getOne(
-        'SELECT caller_id, callee_id FROM calls WHERE room_id = $1', [roomId]
       );
       const otherId = call?.caller_id === userId ? call?.callee_id : call?.caller_id;
       if (otherId) io.to(`user:${otherId}`).emit('call:accepted', { roomId });
@@ -390,20 +420,21 @@ function setupSocket(io) {
     });
 
     socket.on('call:end', async () => {
-      if (activeCalls.has(userId)) {
-        const roomId = activeCalls.get(userId);
-        await db.run(
-          `UPDATE calls SET status = CASE WHEN status = 'missed' THEN 'cancelled' ELSE status END, ended_at = NOW()
-           WHERE room_id = $1`, [roomId]
-        );
-        const call = await db.getOne(
-          'SELECT caller_id, callee_id FROM calls WHERE room_id = $1', [roomId]
-        );
-        const otherId = call?.caller_id === userId ? call?.callee_id : call?.caller_id;
-        if (otherId) io.to(`user:${otherId}`).emit('call:ended', { roomId });
-        activeCalls.delete(userId);
-        if (otherId) activeCalls.delete(otherId);
+      const roomId = activeCalls.get(userId);
+      if (!roomId) return;
+      await db.run(
+        `UPDATE calls SET status = CASE WHEN status = 'missed' THEN 'cancelled' ELSE status END, ended_at = NOW()
+         WHERE room_id = $1`, [roomId]
+      );
+      const call = await db.getOne(
+        'SELECT caller_id, callee_id FROM calls WHERE room_id = $1', [roomId]
+      );
+      const otherId = call?.caller_id === userId ? call?.callee_id : call?.caller_id;
+      if (otherId) {
+        io.to(`user:${otherId}`).emit('call:ended', { roomId });
+        if (activeCalls.get(otherId) === roomId) activeCalls.delete(otherId);
       }
+      activeCalls.delete(userId);
     });
 
     socket.on('call:cancel', async () => {

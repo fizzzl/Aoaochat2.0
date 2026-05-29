@@ -50,6 +50,10 @@ class _AuthScreenState extends State<AuthScreen> {
             create: (_) {
               final s = SocketService();
               s.connect();
+              // 登录后通过 REST API 加载会话列表（不依赖 WebSocket，防止串号）
+              Future.delayed(const Duration(milliseconds: 500), () {
+                s.loadConversations();
+              });
               return s;
             },
             child: const HomeScreen(),

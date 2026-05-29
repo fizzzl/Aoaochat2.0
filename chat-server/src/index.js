@@ -89,12 +89,7 @@ async function main() {
          FROM users WHERE (username ILIKE $1 OR display_name ILIKE $1)
          AND id != $2 AND deactivated_at IS NULL LIMIT 20`,
         [`%${q}%`, req.user.userId]
-      ).catch(() => db.getAll(
-        `SELECT id, username, display_name, avatar_url, avatar_thumb_url
-         FROM users WHERE (username LIKE $1 OR display_name LIKE $1)
-         AND id != $2 AND deactivated_at IS NULL LIMIT 20`,
-        [`%${q}%`, req.user.userId]
-      ));
+      );
       res.json({ code: 0, data: users });
     } catch (err) {
       res.status(500).json({ code: 50000, message: err.message });
@@ -169,6 +164,15 @@ async function main() {
       [req.user.userId]
     );
     res.json({ code: 0, data: calls });
+  });
+
+  // 删除会话
+  app.delete('/api/conversations/:id', authMiddleware, async (req, res) => {
+    await db.run(
+      'DELETE FROM conversation_members WHERE conversation_id = $1 AND user_id = $2',
+      [req.params.id, req.user.userId]
+    );
+    res.json({ code: 0, message: '已删除' });
   });
 
   // 会话
@@ -294,6 +298,53 @@ async function main() {
   // 健康检查
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', time: new Date().toISOString() });
+  });
+
+  // ═══════════ Token 诊断 ═══════════
+  const jwt = require('jsonwebtoken');
+  app.get('/api/whoami', (req, res) => {
+    const header = req.headers.authorization;
+    if (!header || !header.startsWith('Bearer ')) {
+      return res.json({ code: 20001, auth: null });
+    }
+    try {
+      const decoded = jwt.verify(header.slice(7), auth.JWT_SECRET());
+      res.json({ code: 0, auth: decoded });
+    } catch (e) {
+      res.json({ code: 20001, auth: null, error: e.message });
+    }
+  });
+
+  // 会话列表（REST API，不依赖 WebSocket）
+  app.get('/api/conversations', authMiddleware, async (req, res) => {
+    try {
+      const convs = await db.getAll(
+        `SELECT c.id, c.type, c.name, c.last_message, c.last_message_time,
+                cm.unread_count,
+                CASE WHEN c.type = 'private' THEN
+                  (SELECT u.display_name FROM users u
+                   JOIN conversation_members cm2 ON u.id = cm2.user_id
+                   WHERE cm2.conversation_id = c.id AND cm2.user_id != $1 LIMIT 1)
+                ELSE c.name END as display_name,
+                CASE WHEN c.type = 'private' THEN
+                  (SELECT u.id FROM users u
+                   JOIN conversation_members cm2 ON u.id = cm2.user_id
+                   WHERE cm2.conversation_id = c.id AND cm2.user_id != $1 LIMIT 1)
+                END as other_user_id,
+                CASE WHEN c.type = 'private' THEN
+                  (SELECT u.avatar_thumb_url FROM users u
+                   JOIN conversation_members cm2 ON u.id = cm2.user_id
+                   WHERE cm2.conversation_id = c.id AND cm2.user_id != $1 LIMIT 1)
+                END as avatar_url
+         FROM conversations c
+         JOIN conversation_members cm ON c.id = cm.conversation_id AND cm.user_id = $1
+         ORDER BY c.last_message_time DESC NULLS LAST`,
+        [req.user.userId]
+      );
+      res.json({ code: 0, data: convs });
+    } catch (err) {
+      res.status(500).json({ code: 50000, message: err.message });
+    }
   });
 
   // ═══════════ Socket.IO ═══════════

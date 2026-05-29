@@ -1,6 +1,7 @@
 // chat_app/lib/screens/chat_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -10,6 +11,7 @@ import '../services/socket_service.dart';
 import '../services/api_service.dart';
 import '../models/message.dart';
 import '../config.dart';
+import '../utils/time_format.dart';
 import 'image_preview_screen.dart';
 import 'call_screen.dart';
 
@@ -26,7 +28,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   bool _shouldAutoScroll = true;
-  bool _otherTyping = false;
+  bool _otherOnline = false;
   Timer? _typingTimer;
 
   static const _emojis = ['😀','😂','🤣','😊','😍','🤩','😎','🥳','😢','😡','👍','👎','❤️','🔥','⭐','🎉','💯','✅','❌','🎨','🍕','☕','🚀','💡','📎','🔒','👋','🤝','🙏','💪'];
@@ -36,12 +38,6 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<SocketService>().readMessages(widget.conversationId);
-    });
-    // 注册 typing 回调
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final socket = context.read<SocketService>();
-      final prev = socket.onCallIncoming;
-      // Wrap existing callback
     });
   }
 
@@ -61,26 +57,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollToBottom();
   }
 
-  void _onTextChanged(String v) {
-    final socket = context.read<SocketService>();
-    socket.sendTyping(widget.conversationId);
-  }
-
-  String _formatMsgTime(DateTime dt) {
-    final now = DateTime.now();
-    if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
-      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    }
-    return '${dt.month}/${dt.day} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-  }
-
-  String _formatDateHead(DateTime d) {
-    final now = DateTime.now();
-    if (d.year == now.year && d.month == now.month && d.day == now.day) return '今天';
-    final yesterday = now.subtract(const Duration(days: 1));
-    if (d.year == yesterday.year && d.month == yesterday.month && d.day == yesterday.day) return '昨天';
-    return '${d.month}月${d.day}日';
-  }
+  String _formatMsgTime(DateTime dt) => formatMsgTime(dt);
+  String _formatDateHead(DateTime d) => formatDateHead(d);
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -118,10 +96,31 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _recallMessage(int msgId) {
-    context.read<SocketService>().recallMessage(msgId);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('消息已撤回'), behavior: SnackBarBehavior.floating, duration: Duration(seconds: 1)));
+  void _showMessageMenu(Message msg, bool isMe) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
+      builder: (_) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (msg.type != 'image')
+          ListTile(leading: const Icon(Icons.copy), title: const Text('复制'),
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: msg.content));
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('已复制'), behavior: SnackBarBehavior.floating));
+            }),
+        if (isMe && !msg.isRecalled && DateTime.now().difference(msg.createdAt).inSeconds <= 120)
+          ListTile(leading: const Icon(Icons.undo, color: Color(0xFF2563EB)), title: const Text('撤回'),
+            onTap: () { Navigator.pop(context); context.read<SocketService>().recallMessage(msg.id); }),
+        if (isMe && !msg.isRecalled)
+          ListTile(leading: const Icon(Icons.delete_outline, color: Colors.red), title: const Text('删除', style: TextStyle(color: Colors.red)),
+            onTap: () async {
+              Navigator.pop(context);
+              context.read<SocketService>().removeLocalMessage(msg.conversationId, msg.id);
+              await ApiService.delete('/api/messages/${msg.id}');
+            }),
+      ])),
+    );
   }
 
   Future<void> _pickAndSendImage() async {
@@ -140,10 +139,9 @@ class _ChatScreenState extends State<ChatScreen> {
       if (data['code'] == 0 && data['data'] != null) {
         final url = data['data']['url'];
         context.read<SocketService>().sendMessage(conversationId: widget.conversationId, content: url, type: 'image');
-      } else {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message'] ?? '上传失败(${data['code']})'),
-            behavior: SnackBarBehavior.floating));
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'] ?? '上传失败(${data['code']})'), behavior: SnackBarBehavior.floating));
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
@@ -152,25 +150,27 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Widget _buildMessageBubble(Message msg) {
+  Widget _buildMessageBubble(Message msg, {bool isConsecutive = false}) {
     final isMe = msg.senderId == ApiService.userId;
     if (msg.isRecalled) {
       return const Center(child: Padding(padding: EdgeInsets.all(8),
         child: Text('消息已撤回', style: TextStyle(color: Colors.grey, fontSize: 12))));
     }
     return GestureDetector(
-      onLongPress: isMe ? () => _showRecallDialog(msg) : null,
+      onLongPress: () => _showMessageMenu(msg, isMe),
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 6),
+        padding: EdgeInsets.only(bottom: isConsecutive ? 2.0 : 6.0),
         child: Row(
           mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (!isMe) ...[
+            if (!isMe && !isConsecutive) ...[
               CircleAvatar(radius: 14, backgroundColor: const Color(0xFFDBE1FF),
                 child: Text(widget.convName.isNotEmpty ? widget.convName[0] : '?',
                   style: const TextStyle(fontSize: 11, color: Color(0xFF2563EB)))),
               const SizedBox(width: 8),
+            ] else if (!isMe && isConsecutive) ...[
+              const SizedBox(width: 28 + 8), // avatar placeholder
             ],
             Flexible(
               child: Container(
@@ -208,28 +208,28 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _showRecallDialog(Message msg) {
-    final diff = DateTime.now().difference(msg.createdAt).inSeconds;
-    if (diff > 120) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已超过 2 分钟撤回时限'), behavior: SnackBarBehavior.floating));
-      return;
-    }
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
-      builder: (_) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        ListTile(leading: const Icon(Icons.undo, color: Color(0xFF2563EB)), title: const Text('撤回消息'),
-          onTap: () { Navigator.pop(context); _recallMessage(msg.id); }),
-      ])),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.convName),
+        title: Consumer<SocketService>(builder: (_, socket, __) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final online = widget.otherUserId != null &&
+                socket.onlineUsers.any((u) => u.id == widget.otherUserId);
+            if (online != _otherOnline) setState(() => _otherOnline = online);
+          });
+          return Column(children: [
+            Text(widget.convName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            if (_otherOnline)
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(width: 6, height: 6,
+                  decoration: const BoxDecoration(color: Color(0xFF22C55E), shape: BoxShape.circle)),
+                const SizedBox(width: 3),
+                const Text('在线', style: TextStyle(fontSize: 11, color: Color(0xFF22C55E))),
+              ]),
+          ]);
+        }),
+        centerTitle: true,
         actions: [
           IconButton(icon: const Icon(Icons.call, color: Color(0xFF2563EB)), onPressed: () => _startCall('voice')),
           IconButton(icon: const Icon(Icons.videocam, color: Color(0xFF2563EB)), onPressed: () => _startCall('video')),
@@ -250,8 +250,8 @@ class _ChatScreenState extends State<ChatScreen> {
               }
               final grouped = <Widget>[];
               String? lastDate;
-              for (final m in msgs) {
-                final ds = _formatDateHead(m.createdAt);
+              for (var i = 0; i < msgs.length; i++) {
+                final ds = _formatDateHead(msgs[i].createdAt);
                 if (ds != lastDate) {
                   lastDate = ds;
                   grouped.add(Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 12),
@@ -259,7 +259,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       decoration: BoxDecoration(color: const Color(0xFFDCE9FF), borderRadius: BorderRadius.circular(10)),
                       child: Text(ds, style: const TextStyle(fontSize: 11, color: Color(0xFF434655)))))));
                 }
-                grouped.add(_buildMessageBubble(m));
+                final isConsecutive = i > 0 && msgs[i-1].senderId == msgs[i].senderId;
+                grouped.add(_buildMessageBubble(msgs[i], isConsecutive: isConsecutive));
               }
               return ListView(controller: _scrollCtrl,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -267,7 +268,6 @@ class _ChatScreenState extends State<ChatScreen> {
             },
           ),
         ),
-        // 正在输入
         Consumer<SocketService>(
           builder: (_, socket, __) {
             final typing = socket.isOtherTyping(widget.conversationId);
@@ -282,7 +282,6 @@ class _ChatScreenState extends State<ChatScreen> {
               : const SizedBox.shrink();
           },
         ),
-        // Input bar
         Container(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
           decoration: BoxDecoration(color: Colors.white, boxShadow: [
@@ -303,9 +302,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     hintText: '输入消息...', hintStyle: TextStyle(color: Color(0xFF737686), fontSize: 14)),
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) => _send(),
-                  onChanged: (_) {
-                    context.read<SocketService>().sendTyping(widget.conversationId);
-                  },
+                  onChanged: (_) => context.read<SocketService>().sendTyping(widget.conversationId),
                 ),
               ),
             ),

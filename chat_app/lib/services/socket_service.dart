@@ -15,6 +15,7 @@ class SocketService extends ChangeNotifier {
   final List<Conversation> _conversations = [];
   final Map<int, List<Message>> _messages = {};
   User? _chatPartner;
+  Timer? _heartbeat;
 
   bool get connected => _connected;
   List<User> get onlineUsers => _onlineUsers;
@@ -24,11 +25,24 @@ class SocketService extends ChangeNotifier {
 
   List<Message> getMessages(int conversationId) => _messages[conversationId] ?? [];
 
+  void clear() {
+    _onlineUsers.clear();
+    _conversations.clear();
+    _messages.clear();
+    _typingConversations.clear();
+    _connected = false;
+    notifyListeners();
+  }
+
   void connect() {
     final token = ApiService.token;
     if (token == null) return;
+    clear();
+    if (_socket != null) disconnect();
 
-    _socket = io.io(AppConfig.serverUrl, {
+    // 加时间戳参数防止 Socket.IO 复用传输层
+    final url = '${AppConfig.serverUrl}?_=${DateTime.now().millisecondsSinceEpoch}';
+    _socket = io.io(url, {
       'transports': ['websocket'],
       'autoConnect': false,
       'reconnection': true,
@@ -40,7 +54,6 @@ class SocketService extends ChangeNotifier {
 
     _socket!.onConnect((_) {
       _connected = true;
-      _socket!.emit('conversation:list');
       notifyListeners();
     });
 
@@ -51,7 +64,6 @@ class SocketService extends ChangeNotifier {
 
     _socket!.onReconnect((_) {
       _connected = true;
-      _socket!.emit('conversation:list');
       notifyListeners();
     });
 
@@ -154,10 +166,29 @@ class SocketService extends ChangeNotifier {
 
     _socket!.connect();
 
-    // 心跳
-    Timer.periodic(const Duration(seconds: 30), (_) {
+    // 心跳（取消旧的心跳）
+    _heartbeat?.cancel();
+    _heartbeat = Timer.periodic(const Duration(seconds: 30), (_) {
       _socket?.emit('ping');
     });
+  }
+
+  void emitConversationList() {
+    _socket?.emit('conversation:list');
+  }
+
+  /// 通过 REST API 加载会话列表（不依赖 WebSocket，防止串号）
+  Future<void> loadConversations() async {
+    try {
+      final data = await ApiService.get('/api/conversations');
+      if (data['code'] == 0 && data['data'] != null) {
+        _conversations.clear();
+        for (final c in data['data']) {
+          _conversations.add(Conversation.fromJson(c));
+        }
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   void sendMessage({required int conversationId, required String content, String type = 'text'}) {
@@ -170,6 +201,11 @@ class SocketService extends ChangeNotifier {
 
   void readMessages(int conversationId) {
     _socket?.emit('message:read', {'conversationId': conversationId});
+  }
+
+  void removeLocalMessage(int convId, int msgId) {
+    _messages[convId]?.removeWhere((m) => m.id == msgId);
+    notifyListeners();
   }
 
   void recallMessage(int messageId) {
@@ -249,8 +285,11 @@ class SocketService extends ChangeNotifier {
   void _onCallSignal(dynamic data) => onCallSignal?.call(data);
 
   void disconnect() {
-    _socket?.disconnect();
-    _socket?.dispose();
+    if (_socket == null) return;
+    _heartbeat?.cancel();
+    _heartbeat = null;
+    _socket!.disconnect();
+    _socket!.dispose();
     _socket = null;
     _connected = false;
     notifyListeners();
